@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="lo">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ລະບົບບໍລິການລົດລາກສຸກເສີນ 24 ຊົ່ວໂມງ</title>
+    
+    <!-- 1. Load Tailwind CSS for Responsive UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 2. Load Lao Font (Phetsarath OT) -->
+    <link href="https://fonts.googleapis.com/css2?family=Phetsarath+OT:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Phetsarath OT', sans-serif;
+        }
+        /* Fade-in Animation */
+        .animate-fadeIn {
+            animation: fadeIn 0.5s ease-out forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+
+    <!-- 3. Load React & ReactDOM (Production version) -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- 4. Load Babel to compile JSX dynamically in the browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- 5. Load Firebase SDK Compat (Required for single-file HTML implementation) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-[#0B3C1D] text-white min-h-screen">
+
+    <!-- React Mounting Target -->
+    <div id="root"></div>
+
+    <!-- React & Firebase Codebase with Babel Compilation -->
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Default mock data in case the database is empty
+        const INITIAL_TRUCKS = [
+            {
+                name: "ລົດລາກຂະໜາດນ້ອຍ (Small Tow Flatbed)",
+                type: "small",
+                price: 150000,
+                driverName: "ທ້າວ ສົມພອນ ສີວິໄລ",
+                driverPhone: "020 55443322",
+                suitability: "ເໝາະສຳລັບລົດເກັງ, ລົດຈັກ ແລະ ລົດ SUV ຂະໜາດນ້ອຍ",
+                imageUrl: "https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?auto=format&fit=crop&q=80&w=600",
+                status: "ว่าง"
+            },
+            {
+                name: "ລົດຍົກຂະໜາດກາງ (Medium Wheel Lift)",
+                type: "medium",
+                price: 250000,
+                driverName: "ທ້າວ ບຸນມີ ແກ້ວມະນີ",
+                driverPhone: "020 99887766",
+                suitability: "ເໝາະສຳລັບລົດກະບະ (Pickup) ແລະ ລົດຕູ້ຂະໜາດກາງ",
+                imageUrl: "https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?auto=format&fit=crop&q=80&w=600",
+                status: "ว่าง"
+            },
+            {
+                name: "ເຄນຍົກຂະໜາດໃຫຍ່ (Heavy Duty Crane Truck)",
+                type: "heavy",
+                price: 500000,
+                driverName: "ທ້າວ ຄຳໄສ ສີປະເສີດ",
+                driverPhone: "020 22334455",
+                suitability: "ເໝາະສຳລັບລົດບັນທຸກ, ລົດເມ ແລະ ອຸປະຕິເຫດຮ້າຍແຮງທີ່ຕົກຮ່ອງ",
+                imageUrl: "https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&q=80&w=600",
+                status: "ว่าง"
+            }
+        ];
+
+        // ==========================================
+        // DYNAMIC FIREBASE INTEGRATION & ROBUST FALLBACK
+        // ==========================================
+        let auth;
+        let db;
+        let useMockDatabase = false;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'tow-truck-app-lao';
+
+        let firebaseConfig = {
+            apiKey: "",
+            authDomain: "mock-tow-truck.firebaseapp.com",
+            projectId: "mock-tow-truck",
+            storageBucket: "mock-tow-truck.appspot.com",
+            messagingSenderId: "1234567890",
+            appId: "1:1234567890:web:abc123xyz"
+        };
+
+        // Try to load env config if available
+        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+            try {
+                firebaseConfig = JSON.parse(__firebase_config);
+            } catch (e) {
+                console.error("Error parsing __firebase_config:", e);
+            }
+        }
+
+        // Initialize Firebase with safety fallback to local storage DB
+        try {
+            if (!firebaseConfig.apiKey || firebaseConfig.apiKey.trim() === "") {
+                throw new Error("Missing Firebase API Key");
+            }
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            auth = firebase.auth();
+            db = firebase.firestore();
+            console.log("Firebase initialized successfully! Running on Live Cloud Database.");
+        } catch (err) {
+            console.warn("Firebase initialization failed/skipped. Activating robust Mock Database compatibility layer.", err.message);
+            useMockDatabase = true;
+
+            // 1. Mock Auth Layer
+            auth = {
+                signInAnonymously: () => Promise.resolve({ user: { uid: 'mock-user-123' } }),
+                onAuthStateChanged: (callback) => {
+                    setTimeout(() => callback({ uid: 'mock-user-123', isAnonymous: true }), 100);
+                    return () => {};
+                }
+            };
+
+            // 2. Local Storage Helpers
+            const getLocalData = (key, defaultVal) => {
+                try {
+                    const val = localStorage.getItem(key);
+                    return val ? JSON.parse(val) : defaultVal;
+                } catch (e) { return defaultVal; }
+            };
+            const saveLocalData = (key, data) => {
+                try { localStorage.setItem(key, JSON.stringify(data)); } catch (e) {}
+            };
+
+            // 3. Mock Firestore Layer (Matches EXACT chain structures used in code)
+            db = {
+                collection: (colName) => {
+                    return {
+                        doc: (docId) => {
+                            return {
+                                collection: (subColName) => {
+                                    return {
+                                        doc: (subDocId) => {
+                                            return {
+                                                collection: (finalColName) => {
+                                                    const storageKey = `mock_db_${colName}_${docId}_${subColName}_${subDocId}_${finalColName}`;
+                                                    
+                                                    return {
+                                                        onSnapshot: (callback) => {
+                                                            const pushData = () => {
+                                                                let items = getLocalData(storageKey, []);
+                                                                if (finalColName === 'trucks' && items.length === 0) {
+                                                                    items = INITIAL_TRUCKS.map((t, i) => ({ id: `truck_${i}`, ...t }));
+                                                                    saveLocalData(storageKey, items);
+                                                                }
+                                                                const snapshot = {
+                                                                    forEach: (cb) => {
+                                                                        items.forEach(item => cb({ id: item.id, data: () => item }));
+                                                                    }
+                                                                };
+                                                                callback(snapshot);
+                                                            };
+
+                                                            pushData();
+                                                            const handleStorageChange = (e) => {
+                                                                if (e.key === storageKey) pushData();
+                                                            };
+                                                            const handleCustomUpdate = () => pushData();
+
+                                                            window.addEventListener('storage', handleStorageChange);
+                                                            window.addEventListener(`update_${storageKey}`, handleCustomUpdate);
+
+                                                            return () => {
+                                                                window.removeEventListener('storage', handleStorageChange);
+                                                                window.removeEventListener(`update_${storageKey}`, handleCustomUpdate);
+                                                            };
+                                                        },
+                                                        add: async (data) => {
+                                                            const items = getLocalData(storageKey, []);
+                                                            const newItem = { id: 'id_' + Math.random().toString(36).substr(2, 9), ...data };
+                                                            items.push(newItem);
+                                                            saveLocalData(storageKey, items);
+                                                            window.dispatchEvent(new Event(`update_${storageKey}`));
+                                                            return { id: newItem.id };
+                                                        },
+                                                        doc: (itemId) => {
+                                                            return {
+                                                                update: async (updateData) => {
+                                                                    const items = getLocalData(storageKey, []);
+                                                                    const idx = items.findIndex(i => i.id === itemId);
+                                                                    if (idx !== -1) {
+                                                                        items[idx] = { ...items[idx], ...updateData };
+                                                                        saveLocalData(storageKey, items);
+                                                                        window.dispatchEvent(new Event(`update_${storageKey}`));
+                                                                    }
+                                                                },
+                                                                delete: async () => {
+                                                                    let items = getLocalData(storageKey, []);
+                                                                    items = items.filter(i => i.id !== itemId);
+                                                                    saveLocalData(storageKey, items);
+                                                                    window.dispatchEvent(new Event(`update_${storageKey}`));
+                                                                }
+                                                            };
+                                                        }
+                                                    };
+                                                }
+                                            };
+                                        }
+                                    };
+                                }
+                            };
+                        }
+                    };
+                }
+            };
+        }
+
+        function App() {
+            // States
+            const [user, setUser] = useState(null);
+            const [currentTab, setCurrentTab] = useState('customer'); // 'customer' | 'admin'
+            const [adminLoggedIn, setAdminLoggedIn] = useState(false);
+            const [adminUsername, setAdminUsername] = useState('');
+            const [adminPassword, setAdminPassword] = useState('');
+            const [adminError, setAdminError] = useState('');
+            
+            const [trucks, setTrucks] = useState([]);
+            const [orders, setOrders] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            // Booking Form States
+            const [selectedTruck, setSelectedTruck] = useState(null);
+            const [customerName, setCustomerName] = useState('');
+            const [customerPhone, setCustomerPhone] = useState('');
+            const [carConditionImg, setCarConditionImg] = useState('');
+            const [damageDesc, setDamageDesc] = useState('');
+            const [gpsLocation, setGpsLocation] = useState({ lat: 17.9757, lng: 102.6331 }); // Vientiane
+            const [detectingGps, setDetectingGps] = useState(false);
+            const [bookingStatus, setBookingStatus] = useState(null);
+            const [activeBookingId, setActiveBookingId] = useState(null);
+
+            // Admin CRUD States
+            const [isEditingTruck, setIsEditingTruck] = useState(false);
+            const [truckFormId, setTruckFormId] = useState(null);
+            const [truckForm, setTruckForm] = useState({
+                name: '', type: 'small', price: '', driverName: '', driverPhone: '', suitability: '', imageUrl: '', status: 'ว่าง'
+            });
+
+            const [toast, setToast] = useState(null);
+            const fileInputRef = useRef(null);
+
+            const showToast = (message, type = 'success') => {
+                setToast({ message, type });
+                setTimeout(() => setToast(null), 4000);
+            };
+
+            // Anonymous Auth initialization
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        await auth.signInAnonymously();
+                    } catch (err) {
+                        console.error("Firebase Auth Error:", err);
+                    }
+                };
+                initAuth();
+
+                const unsubscribe = auth.onAuthStateChanged((usr) => {
+                    setUser(usr);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // Real-time Database Sync
+            useEffect(() => {
+                if (!user) return;
+                setLoading(true);
+
+                // Sync trucks collection
+                const trucksRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('trucks');
+                const unsubscribeTrucks = trucksRef.onSnapshot((snapshot) => {
+                    const trucksData = [];
+                    snapshot.forEach((doc) => {
+                        trucksData.push({ id: doc.id, ...doc.data() });
+                    });
+                    setTrucks(trucksData);
+                    setLoading(false);
+                }, (error) => {
+                    console.error("Error reading trucks:", error);
+                    setLoading(false);
+                });
+
+                // Sync orders collection
+                const ordersRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('orders');
+                const unsubscribeOrders = ordersRef.onSnapshot((snapshot) => {
+                    const ordersData = [];
+                    snapshot.forEach((doc) => {
+                        ordersData.push({ id: doc.id, ...doc.data() });
+                    });
+                    // Sort locally to prevent index requirement issues
+                    ordersData.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                    setOrders(ordersData);
+                }, (error) => {
+                    console.error("Error reading orders:", error);
+                });
+
+                return () => {
+                    unsubscribeTrucks();
+                    unsubscribeOrders();
+                };
+            }, [user]);
+
+            const detectLocation = () => {
+                setDetectingGps(true);
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            setGpsLocation({ lat: position.coords.latitude, lng: position.coords.longitude });
+                            setDetectingGps(false);
+                            showToast("ດຶງຂໍ້ມູນພິກັດ GPS ປະຈຸບັນສຳເລັດ!", "success");
+                        },
+                        () => {
+                            // Safe mock coordinate generator around Vientiane
+                            const randomLat = 17.9757 + (Math.random() - 0.5) * 0.05;
+                            const randomLng = 102.6331 + (Math.random() - 0.5) * 0.05;
+                            setGpsLocation({ lat: randomLat, lng: randomLng });
+                            setDetectingGps(false);
+                            showToast("ໃຊ້ລະບົບຈຳລອງພິກັດນະຄອນຫຼວງວຽງຈັນໃຫ້ແທນ", "warning");
+                        },
+                        { enableHighAccuracy: true, timeout: 8000 }
+                    );
+                } else {
+                    showToast("ອຸປະກອນຂອງທ່ານບໍ່ຮອງຮັບ Geolocation", "error");
+                    setDetectingGps(false);
+                }
+            };
+
+            const simulateCameraCapture = () => {
+                const presets = [
+                    "https://images.unsplash.com/photo-1562426509-5044a121aa49?auto=format&fit=crop&q=80&w=600",
+                    "https://images.unsplash.com/photo-1617400325129-6539c3e62f02?auto=format&fit=crop&q=80&w=600",
+                    "https://images.unsplash.com/photo-1506015391300-4802dc74de2e?auto=format&fit=crop&q=80&w=600"
+                ];
+                setCarConditionImg(presets[Math.floor(Math.random() * presets.length)]);
+                showToast("ຈຳລອງການຖ່າຍພາບສະພາບລົດສຳເລັດ!", "success");
+            };
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        setCarConditionImg(reader.result);
+                        showToast("ອັບໂຫຼດຮູບພາບສະພາບລົດສຳເລັດ", "success");
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const handleBookingSubmit = async (e) => {
+                e.preventDefault();
+                if (!selectedTruck) {
+                    showToast("ກະລຸນາເລືອກປະເພດລົດລາກກ່ອນ", "error");
+                    return;
+                }
+                if (!customerName || !customerPhone) {
+                    showToast("ກະລຸນາປ້ອນຊື່ ແລະ ເບີໂທລະສັບ", "error");
+                    return;
+                }
+
+                setBookingStatus('submitting');
+                try {
+                    const orderPayload = {
+                        customerName,
+                        customerPhone,
+                        truckId: selectedTruck.id,
+                        truckName: selectedTruck.name,
+                        truckPrice: selectedTruck.price,
+                        driverName: selectedTruck.driverName,
+                        driverPhone: selectedTruck.driverPhone,
+                        carConditionImage: carConditionImg || "https://images.unsplash.com/photo-1506015391300-4802dc74de2e?auto=format&fit=crop&q=80&w=600",
+                        damageDescription: damageDesc || "ບໍ່ມີລາຍລະອຽດເພີ່ມເຕີມ",
+                        latitude: gpsLocation.lat,
+                        longitude: gpsLocation.lng,
+                        status: "ລໍຖ້າການຢືນຢັນ",
+                        timestamp: Date.now()
+                    };
+                    const docRef = await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('orders').add(orderPayload);
+                    setActiveBookingId(docRef.id);
+                    setBookingStatus('success');
+                    showToast("ສົ່ງຄຳຮ້ອງຂໍຄວາມຊ່ວຍເຫຼືອສຳເລັດແລ້ວ!", "success");
+                } catch (err) {
+                    console.error("Booking error:", err);
+                    setBookingStatus('error');
+                    showToast("ເກີດຂໍ້ຜິດພາດໃນການສົ່ງຂໍ້ມູນ", "error");
+                }
+            };
+
+            const handleAdminLogin = (e) => {
+                e.preventDefault();
+                if (adminUsername === 'admin' && adminPassword === 'admin') {
+                    setAdminLoggedIn(true);
+                    setAdminError('');
+                    showToast("ເຂົ້າສູ່ລະບົບຜູ້ດູແລສຳເລັດ", "success");
+                } else {
+                    setAdminError("ຊື່ຜູ້ໃຊ້ ຫຼື ລະຫັດຜ່ານ ບໍ່ຖືກຕ້ອງ!");
+                }
+            };
+
+            const handleSaveTruck = async (e) => {
+                e.preventDefault();
+                if (!truckForm.name || !truckForm.price || !truckForm.driverName || !truckForm.driverPhone) {
+                    showToast("ກະລຸນາປ້ອນຂໍ້ມູນໃຫ້ຄົບຖ້ວນ", "error");
+                    return;
+                }
+
+                try {
+                    const payload = {
+                        name: truckForm.name,
+                        type: truckForm.type,
+                        price: Number(truckForm.price),
+                        driverName: truckForm.driverName,
+                        driverPhone: truckForm.driverPhone,
+                        suitability: truckForm.suitability || "ເໝາະສຳລັບລົດທົ່ວໄປ",
+                        imageUrl: truckForm.imageUrl || "https://images.unsplash.com/photo-1586190848861-99aa4a171e90?auto=format&fit=crop&q=80&w=600",
+                        status: truckForm.status || 'ว่าง'
+                    };
+
+                    const colRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('trucks');
+                    if (truckFormId) {
+                        await colRef.doc(truckFormId).update(payload);
+                        showToast("ແກ້ໄຂຂໍ້ມູນລົດລາກສຳເລັດ", "success");
+                    } else {
+                        await colRef.add(payload);
+                        showToast("ເພີ່ມລົດລາກໃໝ່ສຳເລັດ", "success");
+                    }
+
+                    setIsEditingTruck(false);
+                    setTruckFormId(null);
+                    setTruckForm({ name: '', type: 'small', price: '', driverName: '', driverPhone: '', suitability: '', imageUrl: '', status: 'ว่าง' });
+                } catch (err) {
+                    showToast("ເກີດຂໍ້ຜິດພາດໃນການບັນທຶກ", "error");
+                }
+            };
+
+            const handleDeleteTruck = async (id) => {
+                if (confirm("ທ່ານແນ່ໃຈບໍ່ວ່າຕ້ອງການລຶບລົດລາກຄັນນີ້?")) {
+                    try {
+                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('trucks').doc(id).delete();
+                        showToast("ລຶບຂໍ້ມູນລົດລາກສຳເລັດ", "warning");
+                    } catch (err) {
+                        showToast("ບໍ່ສາມາດລຶບຂໍ້ມູນໄດ້", "error");
+                    }
+                }
+            };
+
+            const handleEditTruckClick = (truck) => {
+                setTruckFormId(truck.id);
+                setTruckForm({
+                    name: truck.name, type: truck.type, price: truck.price, driverName: truck.driverName,
+                    driverPhone: truck.driverPhone, suitability: truck.suitability, imageUrl: truck.imageUrl, status: truck.status
+                });
+                setIsEditingTruck(true);
+            };
+
+            const handleUpdateOrderStatus = async (orderId, newStatus, truckIdToUpdate) => {
+                try {
+                    await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('orders').doc(orderId).update({ status: newStatus });
+                    showToast(`ອັບເດດສະຖານະເປັນ: ${newStatus}`, "success");
+
+                    if (truckIdToUpdate) {
+                        const nextTruckStatus = newStatus === 'ກຳລັງໄປຊ່ວຍເຫຼືອ' ? 'ກຳລັງປະຕິບັດງານ' : 'ว่าง';
+                        await db.collection('artifacts').doc(appId).collection('public').doc('data').collection('trucks').doc(truckIdToUpdate).update({ status: nextTruckStatus });
+                    }
+                } catch (err) {
+                    showToast("ບໍ່ສາມາດອັບເດດສະຖານະໄດ້", "error");
+                }
+            };
+
+            const activeBooking = orders.find(o => o.id === activeBookingId);
+
+            return (
+                <div className="min-h-screen flex flex-col font-sans select-none text-gray-900 bg-[#0B3C1D] text-white">
+                    {/* Header (Orange - ສີສົ້ມ) */}
+                    <header className="bg-[#F97316] text-black shadow-lg sticky top-0 z-50">
+                        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setCurrentTab('customer')}>
+                                <div className="bg-black text-[#F97316] p-2.5 rounded-xl flex items-center justify-center text-lg">🚜</div>
+                                <div>
+                                    <h1 className="text-xl md:text-2xl font-black tracking-wider text-black">ລະບົບບໍລິການລົດລາກ</h1>
+                                    <p className="text-xs font-semibold uppercase text-black opacity-80">24/7 Roadside Assistance</p>
+                                </div>
+                            </div>
+                            <div className="flex bg-black bg-opacity-20 rounded-full p-1 border border-black border-opacity-10">
+                                <button onClick={() => setCurrentTab('customer')} className={`px-4 py-2 rounded-full text-sm font-bold transition-all duration-300 ${currentTab === 'customer' ? 'bg-black text-[#F97316] shadow-md' : 'text-black hover:bg-black hover:bg-opacity-10'}`}>👤 ລູກຄ້າ</button>
+                                <button onClick={() => setCurrentTab('admin')} className={`px-4 py-2 rounded-full text-sm font-bold transition-all duration-300 ${currentTab === 'admin' ? 'bg-black text-[#F97316] shadow-md' : 'text-black hover:bg-black hover:bg-opacity-10'}`}>🛠 ແອດມິນ</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Toast Notification */}
+                    {toast && (
+                        <div className="fixed top-20 right-4 z-50 max-w-sm w-full animate-fadeIn">
+                            <div className={`p-4 rounded-xl shadow-2xl border flex items-center space-x-3 ${toast.type === 'success' ? 'bg-[#0B3C1D] text-white border-green-500' : toast.type === 'warning' ? 'bg-[#F97316] text-black border-yellow-600' : 'bg-red-700 text-white border-red-500'}`}>
+                                <span className="text-xl">{toast.type === 'success' ? '✅' : toast.type === 'warning' ? '⚠️' : '🚨'}</span>
+                                <div className="flex-1 font-bold text-sm">{toast.message}</div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Main Content */}
+                    <main className="flex-grow max-w-7xl mx-auto w-full p-4 md:p-6">
+                        {currentTab === 'customer' && (
+                            <div className="space-y-8 animate-fadeIn">
+                                {/* Emergency Info Box */}
+                                <div className="bg-gradient-to-r from-red-600 to-red-800 rounded-3xl p-6 md:p-8 text-center md:text-left md:flex items-center justify-between gap-6 shadow-2xl relative overflow-hidden">
+                                    <div className="space-y-2 relative z-10">
+                                        <span className="bg-yellow-400 text-black text-xs font-black uppercase px-3 py-1 rounded-full animate-pulse inline-block">🚨 ສຸກເສີນ ຕະຫຼອດ 24 ຊົ່ວໂມງ</span>
+                                        <h2 className="text-2xl md:text-3xl font-black">ລົດເພ, ອຸປະຕິເຫດ ຕ້ອງການລົດລາກດ່ວນ?</h2>
+                                        <p className="text-sm text-red-100">ພວກເຮົາພ້ອມໃຫ້ບໍລິການລົດຍົກ, ລົດລາກ ແລະ ລົດເຄນ ຕະຫຼອດ 24 ຊົ່ວໂມງໃນນະຄອນຫຼວງວຽງຈັນ ແລະ ພື້ນທີ່ໃກ້ຄຽງ.</p>
+                                    </div>
+                                    <div className="mt-4 md:mt-0 relative z-10 flex flex-col items-center justify-center bg-black bg-opacity-30 p-4 rounded-2xl border border-red-500">
+                                        <span className="text-xs text-red-200">ເບີໂທສາຍດ່ວນ</span>
+                                        <a href="tel:1199" className="text-2xl md:text-3xl font-black text-yellow-300 hover:underline">1199</a>
+                                    </div>
+                                </div>
+
+                                {/* Live Order Tracking */}
+                                {activeBooking && (
+                                    <div className="bg-slate-900 border-2 border-yellow-400 rounded-3xl p-6 shadow-2xl animate-pulse">
+                                        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-700 pb-4 mb-4">
+                                            <div>
+                                                <span className="text-xs font-bold text-yellow-400 uppercase tracking-widest">ຕິດຕາມສະຖານະການຈອງຫຼ້າສຸດ (Real-time Tracker)</span>
+                                                <h3 className="text-lg font-bold">ຮຽກຮ້ອງໂດຍ: {activeBooking.customerName}</h3>
+                                            </div>
+                                            <span className="px-4 py-1.5 rounded-full text-sm font-black text-black bg-yellow-400">🚦 {activeBooking.status}</span>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div className="bg-slate-800 p-4 rounded-xl">
+                                                <p className="text-xs text-gray-400">ລົດລາກທີ່ເລືອກ:</p>
+                                                <p className="text-base font-bold text-[#F97316]">{activeBooking.truckName}</p>
+                                                <p className="text-xs text-gray-400 mt-1">ຄ່າບໍລິການເລີ່ມຕົ້ນ:</p>
+                                                <p className="text-lg font-extrabold text-yellow-400">{activeBooking.truckPrice?.toLocaleString()} LAK</p>
+                                            </div>
+                                            <div className="bg-slate-800 p-4 rounded-xl">
+                                                <p className="text-xs text-gray-400">👤 ພະນັກງານຂັບລົດລາກ:</p>
+                                                <p className="text-base font-bold">{activeBooking.driverName || 'ກຳລັງຈັດສັນ...'}</p>
+                                                <p className="text-xs text-gray-400 mt-1">📞 ເບີໂທຕິດຕໍ່:</p>
+                                                <a href={`tel:${activeBooking.driverPhone}`} className="text-[#F97316] font-bold text-sm block">{activeBooking.driverPhone}</a>
+                                            </div>
+                                            <div className="bg-slate-800 p-4 rounded-xl flex flex-col justify-between">
+                                                <p className="text-xs text-gray-400">📍 ພິກັດສະຖານທີ່:</p>
+                                                <p className="text-xs font-mono text-gray-300">Lat: {activeBooking.latitude?.toFixed(5)}, Lng: {activeBooking.longitude?.toFixed(5)}</p>
+                                                <div className="flex gap-2 mt-2">
+                                                    <a href={`https://www.google.com/maps/search/?api=1&query=${activeBooking.latitude},${activeBooking.longitude}`} target="_blank" className="flex-1 bg-blue-600 text-white font-bold py-2 rounded-lg text-xs text-center">🗺️ Google Maps</a>
+                                                    <button onClick={() => setActiveBookingId(null)} className="bg-red-600 text-white font-bold px-3 py-2 rounded-lg text-xs">ປິດ</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Step 1: Trucks */}
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between border-b border-emerald-800 pb-2">
+                                        <h3 className="text-xl md:text-2xl font-black flex items-center space-x-2">🚜 ຂັ້ນຕອນທີ 1: ເລືອກຂະໜາດ ແລະ ປະເພດລົດລາກ</h3>
+                                        <span className="text-sm bg-[#F97316] text-black px-3 py-1 rounded-full font-bold">{trucks.length} ຄັນພ້ອມບໍລິການ</span>
+                                    </div>
+                                    {loading ? <p className="text-center py-10 animate-pulse text-emerald-200">ກຳລັງໂຫຼດຂໍ້ມູນຈາກຖານຂໍ້ມູນ...</p> : (
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                            {trucks.map(truck => (
+                                                <div key={truck.id} className={`rounded-3xl overflow-hidden bg-slate-900 border-4 flex flex-col h-full ${selectedTruck?.id === truck.id ? 'border-[#F97316]' : 'border-transparent hover:border-emerald-700'}`}>
+                                                    <div className="relative h-44 overflow-hidden bg-gray-800">
+                                                        <img src={truck.imageUrl} className="w-full h-full object-cover" />
+                                                        <span className="absolute top-3 right-3 px-3 py-1 rounded-full text-xs font-bold text-black bg-green-400">{truck.status === 'ว่าง' ? '🟢 ພ້ອມບໍລິການ' : '🟡 ຕິດງານຢູ່'}</span>
+                                                    </div>
+                                                    <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
+                                                        <div className="space-y-2">
+                                                            <h4 className="text-lg font-bold">{truck.name}</h4>
+                                                            <p className="text-xs text-emerald-300">{truck.suitability}</p>
+                                                            <p className="text-xs text-gray-400">👤 {truck.driverName} • 📞 {truck.driverPhone}</p>
+                                                        </div>
+                                                        <div className="pt-3 border-t border-gray-800 flex items-center justify-between">
+                                                            <span className="text-xl font-black text-yellow-400">{truck.price?.toLocaleString()} LAK</span>
+                                                            <button onClick={() => setSelectedTruck(truck)} className={`px-4 py-2 rounded-xl text-xs font-black transition ${selectedTruck?.id === truck.id ? 'bg-yellow-500 text-black' : 'bg-blue-600 text-white'}`}>{selectedTruck?.id === truck.id ? '✓ ເລືອກແລ້ວ' : 'ເລືອກຄັນນີ້'}</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Step 2: Booking Form */}
+                                <div className="bg-slate-900 rounded-3xl p-6 md:p-8 border border-emerald-800 shadow-2xl">
+                                    <h3 className="text-xl md:text-2xl font-black border-b border-gray-800 pb-4 mb-6">📝 ຂັ້ນຕອນທີ 2: ປ້ອນຂໍ້ມູນການຂໍຄວາມຊ່ວຍເຫຼືອ & ພິກັດ GPS</h3>
+                                    {!selectedTruck ? (
+                                        <div className="text-center py-10 bg-slate-800/40 rounded-2xl border-2 border-dashed border-gray-700">
+                                            <p className="text-yellow-400 font-bold">⚠️ ກະລຸນາເລືອກລົດລາກທີ່ທ່ານຕ້ອງການດ້ານເທິງກ່ອນ!</p>
+                                        </div>
+                                    ) : (
+                                        <form onSubmit={handleBookingSubmit} className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                            <div className="space-y-4">
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    <div>
+                                                        <label className="text-xs font-bold text-gray-300">ชື່ ແລະ ນາມສະກຸນ *</label>
+                                                        <input type="text" required value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="ຕົວຢ່າງ: ທ້າວ ຄຳດີ" className="w-full bg-slate-800 border border-gray-700 rounded-xl px-4 py-3 text-white text-sm" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs font-bold text-gray-300">ເບີໂທລະສັບຕິດຕໍ່ *</label>
+                                                        <input type="tel" required value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="020 XXXXXXXX" className="w-full bg-slate-800 border border-gray-700 rounded-xl px-4 py-3 text-white text-sm" />
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-bold text-gray-300 block">ຮູບສະພາບລົດປະຈຸບັນ *</label>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <button type="button" onClick={simulateCameraCapture} className="bg-yellow-500 hover:bg-yellow-600 text-black font-black px-4 py-2 rounded-xl text-xs">📸 ຖ່າຍຮູບ (ຈຳລອງ)</button>
+                                                        <button type="button" onClick={() => fileInputRef.current?.click()} className="bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2 rounded-xl text-xs">📁 ອັບໂຫຼດຮູບ</button>
+                                                        <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
+                                                    </div>
+                                                    {carConditionImg && <img src={carConditionImg} className="w-32 h-24 object-cover rounded-xl mt-2 border-2 border-[#F97316]" />}
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs font-bold text-gray-300">ອະທິບາຍສະພາບຄວາມເສຍຫາຍ</label>
+                                                    <textarea value={damageDesc} onChange={e => setDamageDesc(e.target.value)} placeholder="ຕົວຢ່າງ: ລົດຍົກຂຶ້ນບໍ່ໄດ້, ຢາງຮົ່ວ..." rows="3" className="w-full bg-slate-800 border border-gray-700 rounded-xl p-3 text-white text-sm"></textarea>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-4 flex flex-col justify-between">
+                                                <div className="space-y-2 bg-slate-800 p-4 rounded-2xl border border-gray-700">
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <h4 className="text-sm font-bold">📍 ພິກັດຈຸດເກີດເຫດ:</h4>
+                                                        <button type="button" onClick={detectLocation} className="bg-blue-600 hover:bg-blue-700 text-white text-[11px] px-2 py-1 rounded">📡 ດຶງ GPS</button>
+                                                    </div>
+                                                    <p className="text-xs text-gray-400 font-mono">Lat: {gpsLocation.lat.toFixed(6)}, Lng: {gpsLocation.lng.toFixed(6)}</p>
+                                                    <div className="h-40 bg-slate-950 rounded-xl flex items-center justify-center border text-xs text-center p-4 text-emerald-400">
+                                                        🗺️ [ແຜນທີ່ຈຳລອງພິກັດນະຄອນຫຼວງວຽງຈັນ] <br/>ແຜນທີ່ພ້ອມເຊື່ອມຕໍ່ລະບົບ Cloud ສົມບູນແບບ
+                                                    </div>
+                                                </div>
+                                                <div className="bg-slate-800 p-5 rounded-2xl border border-gray-700 space-y-3">
+                                                    <div className="flex justify-between items-center font-black">
+                                                        <span>ຄ່າບໍລິການທັງໝົດ:</span>
+                                                        <span className="text-yellow-400 text-xl">{selectedTruck.price?.toLocaleString()} LAK</span>
+                                                    </div>
+                                                    <button type="submit" disabled={bookingStatus === 'submitting'} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-sm transition">
+                                                        {bookingStatus === 'submitting' ? 'ກຳລັງສົ່ງຂໍ້ມູນ...' : '🚨 ສົ່ງຄຳຮ້ອງຂໍລົດລາກດ່ວນ'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </form>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {currentTab === 'admin' && (
+                            <div className="space-y-6">
+                                {!adminLoggedIn ? (
+                                    <div className="max-w-md mx-auto bg-slate-900 rounded-3xl p-8 border border-emerald-800 shadow-2xl space-y-4">
+                                        <h3 className="text-xl font-bold text-center">🔐 ເຂົ້າສູ່ລະບົບແອດມິນ</h3>
+                                        <form onSubmit={handleAdminLogin} className="space-y-4">
+                                            <input type="text" required placeholder="Username (admin)" value={adminUsername} onChange={e => setAdminUsername(e.target.value)} className="w-full bg-slate-800 border rounded-xl px-4 py-3 text-sm text-white" />
+                                            <input type="password" required placeholder="Password (admin)" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} className="w-full bg-slate-800 border rounded-xl px-4 py-3 text-sm text-white" />
+                                            {adminError && <p className="text-red-500 text-xs text-center">{adminError}</p>}
+                                            <button type="submit" className="w-full bg-blue-600 py-3 rounded-xl font-bold">ເຂົ້າສູ່ລະບົບ</button>
+                                        </form>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-6 animate-fadeIn">
+                                        <div className="bg-slate-900 p-4 rounded-2xl flex justify-between items-center border border-emerald-800">
+                                            <div>
+                                                <h3 className="text-lg font-bold">⚙️ Dashboard ຜູ້ດູແລລະບົບ</h3>
+                                                <p className="text-xs text-emerald-400">ຮັບອໍເດີສຸກເສີນ ແລະ ຈັດການຂໍ້ມູນຍານພາຫະນະ</p>
+                                            </div>
+                                            <button onClick={() => setAdminLoggedIn(false)} className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold">ອອກຈາກລະບົບ</button>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                            {/* Orders Request Queue */}
+                                            <div className="lg:col-span-2 space-y-4">
+                                                <h4 className="font-bold border-b border-gray-800 pb-2">🚨 ຂໍ້ມູນຮ້ອງຂໍຈາກລູກຄ້າ ({orders.length})</h4>
+                                                {orders.map(order => (
+                                                    <div key={order.id} className="bg-slate-900 p-5 rounded-2xl border-2 border-gray-800 text-sm space-y-3">
+                                                        <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                                                            <div>
+                                                                <h5 className="font-bold text-base">👤 ລູກຄ້າ: {order.customerName}</h5>
+                                                                <p className="text-xs text-yellow-400">📞 ເບີໂທ: {order.customerPhone}</p>
+                                                            </div>
+                                                            <span className="bg-orange-500 text-black px-3 py-1 rounded text-xs font-bold">{order.status}</span>
+                                                        </div>
+                                                        <div className="flex gap-4">
+                                                            <img src={order.carConditionImage} className="w-24 h-20 object-cover rounded-xl bg-black" />
+                                                            <div className="flex-1 space-y-1">
+                                                                <p className="text-xs text-gray-300 bg-black p-2 rounded">📝 {order.damageDescription}</p>
+                                                                <p className="text-xs text-gray-400">🚜 ລົດລາກ: {order.truckName}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex justify-between items-center pt-2 border-t border-gray-800">
+                                                            <a href={`https://www.google.com/maps?q=${order.latitude},${order.longitude}`} target="_blank" className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs">🗺️ Google Maps</a>
+                                                            <div className="flex gap-1">
+                                                                {order.status === 'ລໍຖ້າການຢືນຢັນ' && <button onClick={() => handleUpdateOrderStatus(order.id, 'ກຳລັງໄປຊ່ວຍເຫຼືອ', order.truckId)} className="bg-yellow-500 text-black font-black px-3 py-1.5 rounded text-xs">🚜 ສົ່ງລົດລາກ (Dispatch)</button>}
+                                                                {order.status === 'ກຳລັງໄປຊ່ວຍເຫຼືອ' && <button onClick={() => handleUpdateOrderStatus(order.id, 'ສຳເລັດແລ້ວ', order.truckId)} className="bg-green-500 text-black font-black px-3 py-1.5 rounded text-xs">✅ ສຳເລັດງານ</button>}
+                                                                <button onClick={() => handleUpdateOrderStatus(order.id, 'ຍົກເລີກແລ້ວ', order.truckId)} className="bg-red-600 text-white px-2 py-1.5 rounded text-xs">ຍົກເລີກ</button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            {/* Fleet Management */}
+                                            <div className="space-y-4">
+                                                <h4 className="font-bold border-b border-gray-800 pb-2">🚚 ຈັດການລົດລາກ ({trucks.length})</h4>
+                                                <button onClick={() => { setIsEditingTruck(!isEditingTruck); setTruckFormId(null); }} className="w-full bg-blue-600 py-2.5 rounded-xl text-xs font-bold">+ ເພີ່ມຄັນໃໝ່</button>
+                                                
+                                                {isEditingTruck && (
+                                                    <form onSubmit={handleSaveTruck} className="bg-slate-900 p-4 rounded-xl border border-gray-800 space-y-3 text-xs">
+                                                        <input type="text" placeholder="ຊື່ລົດລາກ" required value={truckForm.name} onChange={e => setTruckForm({...truckForm, name: e.target.value})} className="w-full bg-slate-800 p-2 rounded border text-white" />
+                                                        <input type="number" placeholder="ລາຄາບໍລິການ (LAK)" required value={truckForm.price} onChange={e => setTruckForm({...truckForm, price: e.target.value})} className="w-full bg-slate-800 p-2 rounded border text-white" />
+                                                        <input type="text" placeholder="ຊື່ພະນັກງານຂັບ" required value={truckForm.driverName} onChange={e => setTruckForm({...truckForm, driverName: e.target.value})} className="w-full bg-slate-800 p-2 rounded border text-white" />
+                                                        <input type="text" placeholder="ເບີໂທຕິດຕໍ່" required value={truckForm.driverPhone} onChange={e => setTruckForm({...truckForm, driverPhone: e.target.value})} className="w-full bg-slate-800 p-2 rounded border text-white" />
+                                                        <button type="submit" className="w-full bg-green-600 py-2 rounded text-white font-bold">💾 ບັນທຶກ</button>
+                                                    </form>
+                                                )}
+
+                                                <div className="space-y-2">
+                                                    {trucks.map(truck => (
+                                                        <div key={truck.id} className="bg-slate-900 p-3 rounded-xl flex items-center justify-between border border-gray-800 text-xs">
+                                                            <div>
+                                                                <p className="font-bold text-white">{truck.name}</p>
+                                                                <p className="text-yellow-400">{truck.price?.toLocaleString()} LAK</p>
+                                                                <p className="text-gray-500">👤 {truck.driverName} • {truck.driverPhone}</p>
+                                                            </div>
+                                                            <button onClick={() => handleDeleteTruck(truck.id)} className="bg-red-600 p-1.5 rounded text-white font-bold">🗑️</button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </main>
+
+                    {/* Footer */}
+                    <footer className="bg-slate-950 text-gray-400 py-6 mt-12 text-center text-xs border-t border-emerald-950">
+                        <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                            <div className="text-center md:text-left">
+                                <p className="font-bold text-[#F97316]">© 2026 ລະບົບບໍລິການລົດລາກສຸກເສີນ 24 ຊົ່ວໂມງ - ນະຄອນຫຼວງວຽງຈັນ</p>
+                                <p className="text-[10px] text-gray-600">ລະບົບຖານຂໍ້ມູນ Cloud Database ເຊື່ອມຕໍ່ Real-time ຜ່ານ Firebase Firestore</p>
+                            </div>
+                            <div className="flex space-x-4 items-center justify-center">
+                                <span className="text-emerald-500 font-mono">
+                                    Status: {useMockDatabase ? "Local Database Persistence (Offline Auto-fallback Mode) 🔄" : "Firebase Cloud Database Active ✅"}
+                                </span>
+                                <span>•</span>
+                                <span className="font-bold">ໂທສາຍດ່ວນ: 1199</span>
+                            </div>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+
+        // Safe Mounting compatible with React 17/18 UMD loading
+        const container = document.getElementById('root');
+        if (ReactDOM.createRoot) {
+            const root = ReactDOM.createRoot(container);
+            root.render(<App />);
+        } else {
+            ReactDOM.render(<App />, container);
+        }
+    </script>
+</body>
+</html>
